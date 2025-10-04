@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG Game - Java Backend</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            background-color: #2c3e50;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .game-info {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat {
+            background: #34495e;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 2px solid #7f8c8d;
+            transition: all 0.3s ease;
+        }
+        
+        .stat.critical {
+            border-color: #e74c3c;
+            background: #c0392b;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { 
+                opacity: 1; 
+                transform: scale(1);
+            }
+            50% { 
+                opacity: 0.7; 
+                transform: scale(1.05);
+            }
+        }
+        
+        #gameCanvas {
+            border: 3px solid #ecf0f1;
+            background-color: #87ceeb;
+            image-rendering: pixelated;
+            cursor: crosshair;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .controls {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #bdc3c7;
+            line-height: 1.6;
+        }
+        
+        .zone-info {
+            margin-top: 10px;
+            background: #2c3e50;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #7f8c8d;
+            font-size: 12px;
+            max-width: 800px;
+            line-height: 1.5;
+        }
+        
+        .message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 4px;
+            border-left: 4px solid #3498db;
+            display: none;
+            z-index: 1000;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            max-width: 300px;
+        }
+        
+        h1 {
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            color: #ecf0f1;
+        }
+    </style>
+</head>
+<body>
+    <h1>RPG Game - Java Backend</h1>
+    
+    <!-- Message système -->
+    <div id="gameMessage" class="message"></div>
+    
+    <!-- Informations du jeu -->
+    <div class="game-info">
+        <div class="stat" id="hpStat">HP: <span id="playerHp">100</span>/<span id="playerMaxHp">100</span></div>
+        <div class="stat">Level: <span id="playerLevel">1</span></div>
+        <div class="stat">EXP: <span id="playerExp">0</span>/100</div>
+        <div class="stat">ATK: <span id="playerAttack">25</span></div>
+        <div class="stat">DEF: <span id="playerDefense">5</span></div>
+        <div class="stat">Zone: <span id="currentZone">1,1</span></div>
+        <div class="stat">Ennemis: <span id="enemyCount">7</span></div>
+        <div class="stat">Score: <span id="playerScore">0</span></div>
+    </div>
+    
+    <!-- Canvas du jeu -->
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <!-- Contrôles -->
+    <div class="controls">
+        <strong>Contrôles :</strong> ZQSD pour se déplacer, ESPACE pour attaquer<br>
+        Approchez-vous des ennemis pour les attaquer - Évitez leurs attaques<br>
+        Les obstacles bloquent le passage - Les lapins fuient, les gobelins vous poursuivent
+    </div>
+    
+    <!-- Informations des zones -->
+    <div class="zone-info">
+        <strong>Légende des comportements :</strong><br>
+        Agressif (Goblin - vous poursuit activement) - Patrouille (Troll - patrouille et attaque si proche) - Fuyant (Lapin - s'enfuit quand vous approchez)
+    </div>
+    
+    <script>
+        // === CONFIGURATION ===
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        
+        // État local pour l'affichage
+        let gameState = null;
+        let keys = {};
+        let lastUpdateTime = 0;
+        
+        // === GESTION DES TOUCHES ===
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            handleMovement(e.key.toLowerCase());
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        // === GESTION DU MOUVEMENT ===
+        function handleMovement(key) {
+            console.log('Touche pressée:', key);
+            let direction = null;
+            
+            switch(key) {
+                case 'z':
+                case 'w':
+                    direction = 'up';
+                    break;
+                case 's':
+                    direction = 'down';
+                    break;
+                case 'q':
+                case 'a':
+                    direction = 'left';
+                    break;
+                case 'd':
+                    direction = 'right';
+                    break;
+                case ' ':
+                    performAttack();
+                    return;
+            }
+            
+            if (direction) {
+                movePlayer(direction);
+            }
+        }
+        
+        // === APPELS API ===
+        function movePlayer(direction) {
+            fetch('/api/player/move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ direction: direction })
+            })
+            .then(response => response.json())
+            .then(data => {
+                updateGameState(data);
+            })
+            .catch(error => {
+                console.error('Erreur lors du mouvement:', error);
+            });
+        }
+        
+        function performAttack() {
+            fetch('/api/player/attack', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                updateGameState(data);
+                showMessage(data.message || 'Attaque!');
+            })
+            .catch(error => {
+                console.error('Erreur lors de l\'attaque:', error);
+            });
+        }
+        
+        function updateGame() {
+            fetch('/api/update', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                updateGameState(data);
+            })
+            .catch(error => {
+                console.error('Erreur lors de la mise à jour:', error);
+            });
+        }
+        
+        // === MISE À JOUR DE L'ÉTAT ===
+        function updateGameState(newState) {
+            console.log('État reçu du serveur:', newState);
+            console.log('Position joueur:', newState.player.x, newState.player.y);
+            gameState = newState;
+            updateUI();
+            render();
+        }
+        
+        function updateUI() {
+            if (!gameState || !gameState.player) return;
+            
+            const player = gameState.player;
+            document.getElementById('playerHp').textContent = player.hp;
+            document.getElementById('playerMaxHp').textContent = player.maxHp;
+            document.getElementById('playerLevel').textContent = player.level;
+            document.getElementById('playerExp').textContent = player.exp;
+            document.getElementById('playerAttack').textContent = player.attack;
+            document.getElementById('playerDefense').textContent = player.defense;
+            document.getElementById('playerScore').textContent = player.score;
+            document.getElementById('enemyCount').textContent = gameState.enemies.length;
+            
+            // Zone du joueur
+            const zoneX = Math.floor(player.x / (800/3));
+            const zoneY = Math.floor(player.y / (600/3));
+            document.getElementById('currentZone').textContent = `${zoneX},${zoneY}`;
+            
+            // HP critique
+            const hpStat = document.getElementById('hpStat');
+            if (player.hp <= player.maxHp * 0.3) {
+                hpStat.classList.add('critical');
+            } else {
+                hpStat.classList.remove('critical');
+            }
+        }
+        
+        // === RENDU ===
+        function render() {
+            if (!gameState) return;
+            
+            // Nettoyer le canvas
+            ctx.clearRect(0, 0, 800, 600);
+            
+            // Fond
+            ctx.fillStyle = '#87ceeb';
+            ctx.fillRect(0, 0, 800, 600);
+            
+            // Obstacles
+            gameState.obstacles.forEach(obstacle => {
+                ctx.fillStyle = getObstacleColor(obstacle.type);
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+            
+            // Ennemis
+            gameState.enemies.forEach(enemy => {
+                const size = getEnemySize(enemy.type);
+                const color = getEnemyColor(enemy.type);
+                
+                // Corps de l'ennemi
+                ctx.fillStyle = enemy.isAttacking ? '#FF0000' : color;
+                ctx.fillRect(enemy.x - size/2, enemy.y - size/2, size, size);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(enemy.x - size/2, enemy.y - size/2, size, size);
+                
+                // Barre de vie
+                const barWidth = size;
+                const barHeight = 4;
+                const barX = enemy.x - barWidth/2;
+                const barY = enemy.y - size/2 - 8;
+                
+                ctx.fillStyle = '#333';
+                ctx.fillRect(barX, barY, barWidth, barHeight);
+                
+                const hpPercent = enemy.hp / enemy.maxHp;
+                ctx.fillStyle = hpPercent > 0.7 ? '#4CAF50' : 
+                               hpPercent > 0.3 ? '#FFC107' : '#FF5722';
+                ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+            });
+            
+            // Joueur
+            const player = gameState.player;
+            if (player.hp <= 0) {
+                ctx.fillStyle = '#666666';
+            } else if (player.isAttacking) {
+                ctx.fillStyle = '#FFD700';
+                ctx.shadowColor = '#FFA500';
+                ctx.shadowBlur = 15;
+            } else {
+                ctx.fillStyle = '#4CAF50';
+                ctx.shadowBlur = 0;
+            }
+            
+            ctx.fillRect(player.x - 8, player.y - 8, 16, 16);
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(player.x - 8, player.y - 8, 16, 16);
+            
+            // Symbole du joueur
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('@', player.x, player.y + 4);
+            
+            // Zones (grille de debug)
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * 800/3, 0);
+                ctx.lineTo(i * 800/3, 600);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(0, i * 600/3);
+                ctx.lineTo(800, i * 600/3);
+                ctx.stroke();
+            }
+        }
+        
+        // === FONCTIONS UTILITAIRES ===
+        function getEnemySize(type) {
+            switch(type) {
+                case 'GOBLIN': return 16;
+                case 'TROLL': return 32;
+                case 'RABBIT': return 12;
+                default: return 16;
+            }
+        }
+        
+        function getEnemyColor(type) {
+            switch(type) {
+                case 'GOBLIN': return '#FF5722';
+                case 'TROLL': return '#9C27B0';
+                case 'RABBIT': return '#8BC34A';
+                default: return '#666666';
+            }
+        }
+        
+        function getObstacleColor(type) {
+            switch(type) {
+                case 'TREE': return '#4CAF50';
+                case 'ROCK': return '#9E9E9E';
+                case 'BUSH': return '#8BC34A';
+                case 'HOUSE': return '#795548';
+                case 'WATER': return '#2196F3';
+                default: return '#666666';
+            }
+        }
+        
+        function showMessage(text, duration = 2000) {
+            const messageEl = document.getElementById('gameMessage');
+            messageEl.textContent = text;
+            messageEl.style.display = 'block';
+            
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, duration);
+        }
+        
+        // === INITIALISATION ===
+        function initGame() {
+            fetch('/api/gamestate')
+                .then(response => response.json())
+                .then(data => {
+                    updateGameState(data);
+                    showMessage('Jeu initialisé! Utilisez ZQSD pour vous déplacer.');
+                })
+                .catch(error => {
+                    console.error('Erreur lors de l\'initialisation:', error);
+                    showMessage('Erreur de connexion au serveur');
+                });
+        }
+        
+        // === BOUCLE DE JEU ===
+        function gameLoop() {
+            const now = Date.now();
+            
+            // Mise à jour du jeu côté serveur toutes les 100ms
+            if (now - lastUpdateTime > 100) {
+                updateGame();
+                lastUpdateTime = now;
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Démarrage du jeu
+        console.log("Démarrage du jeu RPG avec backend Java");
+        initGame();
+        gameLoop();
+    </script>
+</body>
+</html>
