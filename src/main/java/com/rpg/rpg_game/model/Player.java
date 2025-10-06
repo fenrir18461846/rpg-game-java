@@ -144,8 +144,10 @@ public class Player {
     }
     
     private void checkLevelUp() {
-        if (exp >= getExpRequiredForLevel(level + 1)) {
+        int expRequired = level * 100;
+        while (exp >= expRequired) {
             levelUp();
+            expRequired = level * 100;
         }
     }
     
@@ -153,13 +155,9 @@ public class Player {
         level++;
         exp = 0;
         maxHp += 20;
-        hp = maxHp; // Soigner complètement au level up
+        hp = maxHp;
         attack += 5;
         defense += 2;
-    }
-    
-    private int getExpRequiredForLevel(int targetLevel) {
-        return 100 * targetLevel; // 100 exp pour le niveau 2, 200 pour le 3, etc.
     }
     
     @Override
